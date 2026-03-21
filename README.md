@@ -22,22 +22,25 @@ gleam add glupbit@1
 import gleam/io
 import gleam/option.{None, Some}
 import glupbit
+import glupbit/quotation/candle
+import glupbit/quotation/market
+import glupbit/quotation/ticker
 
 pub fn main() {
   let client = glupbit.new()
-  let assert Ok(market) = glupbit.market("KRW-BTC")
+  let assert Ok(btc) = glupbit.market("KRW-BTC")
 
   // 거래 가능한 마켓 전부 가져오기
-  let assert Ok(response) = glupbit.quotation.market.list_all(client)
+  let assert Ok(response) = market.list_all(client)
   io.debug(response.data)
 
   // 비트코인 현재가 조회!
-  let assert Ok(response) = glupbit.quotation.ticker.get_tickers(client, [market])
+  let assert Ok(response) = ticker.get_tickers(client, markets: [btc])
   io.debug(response.data)
 
   // 1분봉 캔들 10개 가져오기
   let assert Ok(response) =
-    glupbit.quotation.candle.get_minutes(client, glupbit.quotation.candle.Min1, market, None, Some(10))
+    candle.get_minutes(client, unit: candle.Min1, market: btc, to: None, count: Some(10))
   io.debug(response.data)
 }
 ```
@@ -47,6 +50,7 @@ pub fn main() {
 ```gleam
 import gleam/io
 import glupbit
+import glupbit/exchange/account
 
 pub fn main() {
   // 방법 1: key를 직접 넣어주기
@@ -61,7 +65,7 @@ pub fn main() {
   let assert Ok(client) = glupbit.new_from_env()
 
   // 내 잔고 확인하기!
-  let assert Ok(response) = glupbit.exchange.account.get_balances(client)
+  let assert Ok(response) = account.get_balances(client)
   io.debug(response.data)
 }
 ```
@@ -70,7 +74,6 @@ pub fn main() {
 
 ```gleam
 import gleam/io
-import gleam/option.{None}
 import glupbit
 import glupbit/websocket/connection
 import glupbit/websocket/subscription.{TickerSub, Default}
@@ -84,7 +87,7 @@ pub fn main() {
       Nil
     })
 
-  connection.subscribe(ws, [TickerSub([market], None, None)], Default)
+  connection.subscribe(ws, [TickerSub([market], False, False)], Default)
 }
 ```
 
@@ -100,7 +103,7 @@ pub fn main() {
 | `ticker` | `GET /ticker` | `get_tickers`, `get_all_tickers` |
 | `candle` | `GET /candles/*` | `get_seconds`, `get_minutes`, `get_days`, `get_weeks`, `get_months`, `get_years` |
 | `trade` | `GET /trades/ticks` | `get_recent_trades` |
-| `orderbook` | `GET /orderbook` | `get_orderbooks`, `get_supported_levels` |
+| `orderbook` | `GET /orderbook` | `get_orderbooks`, `get_supported_levels`, `get_orderbook_instruments` |
 
 ### Exchange API (인증 필요해!)
 
@@ -111,8 +114,11 @@ pub fn main() {
 | `order` | `GET /order` | `get_order`, `get_order_by_identifier` |
 | `order` | `GET /orders/open` | `list_open_orders` |
 | `order` | `GET /orders/closed` | `list_closed_orders` |
+| `order` | `GET /orders/uuids` | `list_orders_by_uuids` |
 | `order` | `DELETE /order` | `cancel_order`, `cancel_order_by_identifier` |
+| `order` | `DELETE /orders/uuids` | `cancel_orders_by_uuids` |
 | `order` | `DELETE /orders/open` | `batch_cancel_orders` |
+| `order` | `POST /orders/cancel_and_new` | `cancel_and_new_order` |
 | `order` | `GET /orders/chance` | `get_order_chance` |
 | `withdraw` | `POST /withdraws/coin` | `withdraw_coin` |
 | `withdraw` | `POST /withdraws/krw` | `withdraw_krw` |
@@ -125,6 +131,8 @@ pub fn main() {
 `connect_public`으로는 공개 데이터를, `connect_private`로는 내 주문이랑 내 자산을 실시간으로 볼 수 있어!
 
 구독 종류: `TickerSub`, `TradeSub`, `OrderbookSub`, `CandleSub`, `MyOrderSub`, `MyAssetSub`
+
+`list_subscriptions`로 현재 구독 중인 스트림 목록도 조회할 수 있어!
 
 ## 이 라이브러리의 좋은 점!
 

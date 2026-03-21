@@ -19,3 +19,17 @@ pub fn decode_orderbook_test() {
   assert first.ask_price == 60_100_000.0
   assert first.bid_price == 60_000_000.0
 }
+
+pub fn decode_orderbook_instrument_test() {
+  let json_str =
+    "[{\"market\":\"KRW-BTC\",\"quote_currency\":\"KRW\",\"tick_size\":\"1000\",\"supported_levels\":[\"0\",\"10000\",\"100000\",\"1000000\",\"10000000\",\"100000000\"]},{\"market\":\"KRW-ETH\",\"quote_currency\":\"KRW\",\"tick_size\":\"1000\",\"supported_levels\":[\"0\",\"10000\",\"100000\",\"1000000\"]}]"
+  let assert Ok(instruments) =
+    json.parse(json_str, decode.list(orderbook.orderbook_instrument_decoder()))
+  let assert [btc, eth] = instruments
+  assert btc.market == "KRW-BTC"
+  assert btc.quote_currency == "KRW"
+  assert btc.tick_size == "1000"
+  assert list.length(btc.supported_levels) == 6
+  assert eth.market == "KRW-ETH"
+  assert list.length(eth.supported_levels) == 4
+}

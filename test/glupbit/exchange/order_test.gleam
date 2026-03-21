@@ -16,6 +16,10 @@ pub fn decode_order_response_test() {
   assert resp.trades_count == 0
   assert resp.time_in_force == Some("ioc")
   assert resp.smp_type == Some("cancel_maker")
+  // Fields absent from response decode as None
+  assert resp.prevented_volume == None
+  assert resp.prevented_locked == None
+  assert resp.trades == None
 }
 
 pub fn decode_order_detail_test() {
@@ -30,6 +34,7 @@ pub fn decode_order_detail_test() {
   assert trade.price == "60000000"
   assert trade.volume == "0.5"
   assert trade.funds == "30000000"
+  assert trade.trend == None
 }
 
 pub fn decode_order_detail_no_trades_test() {
@@ -38,4 +43,28 @@ pub fn decode_order_detail_no_trades_test() {
   let assert Ok(detail) = json.parse(json_str, order.order_detail_decoder())
   assert detail.trades == None
   assert detail.price == None
+}
+
+pub fn decode_cancel_and_new_response_test() {
+  let json_str =
+    "{\"market\":\"KRW-BTC\",\"uuid\":\"cdd92199-2897-4e14-9448-f923320408ad\",\"side\":\"bid\",\"ord_type\":\"limit\",\"price\":\"140000000\",\"state\":\"wait\",\"created_at\":\"2025-07-04T15:00:00+09:00\",\"volume\":\"0.01\",\"remaining_volume\":\"0.01\",\"executed_volume\":\"0.0\",\"reserved_fee\":\"700.0\",\"remaining_fee\":\"700.0\",\"paid_fee\":\"0.0\",\"locked\":\"1400000.0\",\"trades_count\":0,\"trades\":[],\"prevented_volume\":\"0\",\"prevented_locked\":\"0\"}"
+  let assert Ok(resp) = json.parse(json_str, order.order_response_decoder())
+  assert resp.market == "KRW-BTC"
+  assert resp.uuid == "cdd92199-2897-4e14-9448-f923320408ad"
+  assert resp.side == "bid"
+  assert resp.price == Some("140000000")
+  assert resp.state == "wait"
+  assert resp.prevented_volume == Some("0")
+  assert resp.prevented_locked == Some("0")
+  assert resp.trades == Some([])
+}
+
+pub fn decode_cancel_and_new_with_trend_test() {
+  let json_str =
+    "{\"market\":\"KRW-BTC\",\"uuid\":\"aaa-111\",\"side\":\"bid\",\"ord_type\":\"limit\",\"price\":\"140000000\",\"state\":\"done\",\"created_at\":\"2025-07-04T15:00:00+09:00\",\"volume\":\"0.01\",\"remaining_volume\":\"0.0\",\"executed_volume\":\"0.01\",\"reserved_fee\":\"700.0\",\"remaining_fee\":\"0.0\",\"paid_fee\":\"700.0\",\"locked\":\"0.0\",\"trades_count\":1,\"trades\":[{\"market\":\"KRW-BTC\",\"uuid\":\"trade-1\",\"price\":\"140000000\",\"volume\":\"0.01\",\"funds\":\"1400000\",\"trend\":\"up\",\"created_at\":\"2025-07-04T15:00:01+09:00\",\"side\":\"bid\"}],\"prevented_volume\":\"0\",\"prevented_locked\":\"0\"}"
+  let assert Ok(resp) = json.parse(json_str, order.order_response_decoder())
+  assert resp.state == "done"
+  let assert Some([trade]) = resp.trades
+  assert trade.trend == Some("up")
+  assert trade.funds == "1400000"
 }

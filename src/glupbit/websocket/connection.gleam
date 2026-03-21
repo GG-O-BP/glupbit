@@ -1,7 +1,7 @@
 //// WebSocket connection management via stratus actors.
 ////
 //// Handles public and private (authenticated) connections with automatic
-//// message routing based on the `type` field in incoming JSON.
+//// message routing based on `type` / `method` fields in incoming JSON.
 
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
@@ -27,6 +27,7 @@ pub type WsMessage {
   TickerMsg(subscription.TickerData)
   TradeMsg(subscription.TradeData)
   OrderbookMsg(subscription.OrderbookData)
+  SubscriptionListMsg(subscription.ListSubscriptionsResponse)
   StatusMsg(String)
   ErrorMsg(name: String, message: String)
   RawMsg(String)
@@ -35,6 +36,7 @@ pub type WsMessage {
 /// User message type for the WebSocket actor.
 pub type WsCommand {
   Subscribe(List(subscription.Subscription), subscription.WsFormat)
+  ListSubscriptions
 }
 
 /// Internal WebSocket state.
@@ -81,6 +83,11 @@ pub fn subscribe(
   process.send(conn, stratus.to_user_message(Subscribe(subscriptions, format)))
 }
 
+/// Query the list of active subscriptions on the WebSocket.
+pub fn list_subscriptions(conn: WsHandle) -> Nil {
+  process.send(conn, stratus.to_user_message(ListSubscriptions))
+}
+
 // --- Internal ---
 
 fn start_ws(
@@ -99,10 +106,8 @@ fn start_ws(
         stratus.continue(WsState(..state, user_state: new_user_state))
       }
       stratus.Binary(_) -> stratus.continue(state)
-      stratus.User(Subscribe(subs, format)) -> {
-        let ticket = uuid.v4_string()
-        let msg_text =
-          subscription.build_subscription_message(ticket, subs, format)
+      stratus.User(cmd) -> {
+        let msg_text = build_command_message(cmd)
         let _ = stratus.send_text_message(conn, msg_text)
         stratus.continue(state)
       }
@@ -113,48 +118,73 @@ fn start_ws(
   |> result.map(fn(started) { started.data })
 }
 
+fn build_command_message(cmd: WsCommand) -> String {
+  let ticket = uuid.v4_string()
+  case cmd {
+    Subscribe(subs, format) ->
+      subscription.build_subscription_message(ticket, subs, format)
+    ListSubscriptions -> subscription.build_list_subscriptions_message(ticket)
+  }
+}
+
+// --- Message decoding ---
+
 fn decode_ws_message(text: String) -> WsMessage {
-  case json.parse(text, status_decoder()) {
+  case json.parse(text, field_decoder("status")) {
     Ok(status) -> StatusMsg(status)
     Error(_) ->
       case json.parse(text, error_decoder()) {
         Ok(#(name, message)) -> ErrorMsg(name, message)
-        Error(_) ->
-          case json.parse(text, type_field_decoder()) {
-            Ok("ticker") ->
-              case json.parse(text, subscription.ticker_data_decoder()) {
-                Ok(data) -> TickerMsg(data)
-                Error(_) -> RawMsg(text)
-              }
-            Ok("trade") ->
-              case json.parse(text, subscription.trade_data_decoder()) {
-                Ok(data) -> TradeMsg(data)
-                Error(_) -> RawMsg(text)
-              }
-            Ok("orderbook") ->
-              case json.parse(text, subscription.orderbook_data_decoder()) {
-                Ok(data) -> OrderbookMsg(data)
-                Error(_) -> RawMsg(text)
-              }
-            Ok(_) -> RawMsg(text)
-            Error(_) -> RawMsg(text)
-          }
+        Error(_) -> decode_data_message(text)
       }
   }
 }
 
-fn status_decoder() -> decode.Decoder(String) {
-  use status <- decode.field("status", decode.string)
-  decode.success(status)
+fn decode_data_message(text: String) -> WsMessage {
+  case json.parse(text, field_decoder("method")) {
+    Ok("LIST_SUBSCRIPTIONS") ->
+      try_decode(
+        text,
+        subscription.list_subscriptions_response_decoder(),
+        SubscriptionListMsg,
+      )
+    Ok(_) -> RawMsg(text)
+    Error(_) ->
+      case json.parse(text, field_decoder("type")) {
+        Ok(type_name) -> decode_by_type(text, type_name)
+        Error(_) -> RawMsg(text)
+      }
+  }
+}
+
+fn decode_by_type(text: String, type_name: String) -> WsMessage {
+  case type_name {
+    "ticker" -> try_decode(text, subscription.ticker_data_decoder(), TickerMsg)
+    "trade" -> try_decode(text, subscription.trade_data_decoder(), TradeMsg)
+    "orderbook" ->
+      try_decode(text, subscription.orderbook_data_decoder(), OrderbookMsg)
+    _ -> RawMsg(text)
+  }
+}
+
+fn try_decode(
+  text: String,
+  decoder: decode.Decoder(a),
+  to_msg: fn(a) -> WsMessage,
+) -> WsMessage {
+  case json.parse(text, decoder) {
+    Ok(data) -> to_msg(data)
+    Error(_) -> RawMsg(text)
+  }
+}
+
+fn field_decoder(name: String) -> decode.Decoder(String) {
+  use value <- decode.field(name, decode.string)
+  decode.success(value)
 }
 
 fn error_decoder() -> decode.Decoder(#(String, String)) {
   use name <- decode.subfield(["error", "name"], decode.string)
   use message <- decode.subfield(["error", "message"], decode.string)
   decode.success(#(name, message))
-}
-
-fn type_field_decoder() -> decode.Decoder(String) {
-  use type_name <- decode.field("type", decode.string)
-  decode.success(type_name)
 }

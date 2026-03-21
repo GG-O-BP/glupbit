@@ -12,7 +12,7 @@ pub type WalletStatus {
   WalletStatus(
     currency: String,
     wallet_state: String,
-    block_state: String,
+    block_state: Option(String),
     block_height: Option(Int),
     block_updated_at: Option(String),
     block_elapsed_minutes: Option(Int),
@@ -26,12 +26,21 @@ pub type ApiKeyInfo {
 
 /// Travel rule VASP info.
 pub type Vasp {
-  Vasp(vasp_name: String, is_verified: Bool)
+  Vasp(
+    vasp_name: String,
+    vasp_uuid: String,
+    depositable: Bool,
+    withdrawable: Bool,
+  )
 }
 
 /// Travel rule verification result.
 pub type TravelRuleResult {
-  TravelRuleResult(is_verified: Bool)
+  TravelRuleResult(
+    deposit_uuid: String,
+    verification_result: String,
+    deposit_state: String,
+  )
 }
 
 /// Get wallet deposit/withdrawal service status.
@@ -63,14 +72,17 @@ pub fn list_travelrule_vasps(
 pub fn verify_travelrule_by_uuid(
   c: client.AuthClient,
   deposit_uuid: String,
-  vasp_name: String,
+  vasp_uuid: String,
 ) -> Result(types.ApiResponse(TravelRuleResult), types.ApiError) {
   let body =
     json.object([
-      #("uuid", json.string(deposit_uuid)),
-      #("vasp_name", json.string(vasp_name)),
+      #("deposit_uuid", json.string(deposit_uuid)),
+      #("vasp_uuid", json.string(vasp_uuid)),
     ])
-  let params = [#("uuid", deposit_uuid), #("vasp_name", vasp_name)]
+  let params = [
+    #("deposit_uuid", deposit_uuid),
+    #("vasp_uuid", vasp_uuid),
+  ]
   client.auth_post(
     c,
     "/travel_rule/deposit/uuid",
@@ -84,20 +96,23 @@ pub fn verify_travelrule_by_uuid(
 /// POST /travel_rule/deposit/txid
 pub fn verify_travelrule_by_txid(
   c: client.AuthClient,
+  vasp_uuid: String,
   txid: String,
   currency: String,
-  vasp_name: String,
+  net_type: String,
 ) -> Result(types.ApiResponse(TravelRuleResult), types.ApiError) {
   let body =
     json.object([
+      #("vasp_uuid", json.string(vasp_uuid)),
       #("txid", json.string(txid)),
       #("currency", json.string(currency)),
-      #("vasp_name", json.string(vasp_name)),
+      #("net_type", json.string(net_type)),
     ])
   let params = [
+    #("vasp_uuid", vasp_uuid),
     #("txid", txid),
     #("currency", currency),
-    #("vasp_name", vasp_name),
+    #("net_type", net_type),
   ]
   client.auth_post(
     c,
@@ -113,7 +128,11 @@ pub fn verify_travelrule_by_txid(
 fn wallet_status_decoder() -> decode.Decoder(WalletStatus) {
   use currency <- decode.field("currency", decode.string)
   use wallet_state <- decode.field("wallet_state", decode.string)
-  use block_state <- decode.field("block_state", decode.string)
+  use block_state <- decode.optional_field(
+    "block_state",
+    None,
+    decode.optional(decode.string),
+  )
   use block_height <- decode.optional_field(
     "block_height",
     None,
@@ -147,11 +166,19 @@ fn api_key_info_decoder() -> decode.Decoder(ApiKeyInfo) {
 
 fn vasp_decoder() -> decode.Decoder(Vasp) {
   use vasp_name <- decode.field("vasp_name", decode.string)
-  use is_verified <- decode.field("is_verified", decode.bool)
-  decode.success(Vasp(vasp_name:, is_verified:))
+  use vasp_uuid <- decode.field("vasp_uuid", decode.string)
+  use depositable <- decode.field("depositable", decode.bool)
+  use withdrawable <- decode.field("withdrawable", decode.bool)
+  decode.success(Vasp(vasp_name:, vasp_uuid:, depositable:, withdrawable:))
 }
 
 fn travelrule_result_decoder() -> decode.Decoder(TravelRuleResult) {
-  use is_verified <- decode.field("is_verified", decode.bool)
-  decode.success(TravelRuleResult(is_verified:))
+  use deposit_uuid <- decode.field("deposit_uuid", decode.string)
+  use verification_result <- decode.field("verification_result", decode.string)
+  use deposit_state <- decode.field("deposit_state", decode.string)
+  decode.success(TravelRuleResult(
+    deposit_uuid:,
+    verification_result:,
+    deposit_state:,
+  ))
 }

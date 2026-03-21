@@ -47,7 +47,7 @@ pub fn withdraw_coin(
 ) -> Result(types.ApiResponse(WithdrawResponse), types.ApiError) {
   let pairs =
     [
-      Some(#("currency", req.currency)),
+      Some(#("coin", req.currency)),
       Some(#("net_type", req.net_type)),
       Some(#("amount", req.amount)),
       Some(#("address", req.address)),

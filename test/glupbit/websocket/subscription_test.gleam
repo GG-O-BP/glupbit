@@ -1,5 +1,5 @@
 import gleam/json
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/string
 
 import glupbit/types
@@ -106,4 +106,37 @@ pub fn decode_orderbook_data_test() {
   assert data.code == "KRW-BTC"
   assert data.total_ask_size == 10.5
   assert data.total_bid_size == 12.3
+}
+
+pub fn build_list_subscriptions_message_test() {
+  let msg = subscription.build_list_subscriptions_message("test-ticket-ls")
+  assert string.contains(msg, "\"ticket\":\"test-ticket-ls\"")
+  assert string.contains(msg, "\"method\":\"LIST_SUBSCRIPTIONS\"")
+}
+
+pub fn decode_list_subscriptions_response_test() {
+  let json_str =
+    "{\"method\":\"LIST_SUBSCRIPTIONS\",\"result\":[{\"type\":\"ticker\",\"codes\":[\"KRW-BTC\",\"KRW-ETH\"]},{\"type\":\"orderbook\",\"codes\":[\"KRW-BTC\",\"KRW-ETH\"],\"level\":0.0}],\"ticket\":\"unique uuid\"}"
+  let assert Ok(resp) =
+    json.parse(json_str, subscription.list_subscriptions_response_decoder())
+  assert resp.method == "LIST_SUBSCRIPTIONS"
+  assert resp.ticket == "unique uuid"
+  let assert [ticker_sub, orderbook_sub] = resp.result
+  assert ticker_sub.type_name == "ticker"
+  assert ticker_sub.codes == Some(["KRW-BTC", "KRW-ETH"])
+  assert ticker_sub.level == None
+  assert orderbook_sub.type_name == "orderbook"
+  assert orderbook_sub.level == Some(0.0)
+}
+
+pub fn decode_list_subscriptions_exchange_test() {
+  let json_str =
+    "{\"method\":\"LIST_SUBSCRIPTIONS\",\"result\":[{\"type\":\"myAsset\"},{\"type\":\"myOrder\",\"codes\":[\"KRW-BTC\",\"KRW-ETH\"]}],\"ticket\":\"priv-ticket\"}"
+  let assert Ok(resp) =
+    json.parse(json_str, subscription.list_subscriptions_response_decoder())
+  let assert [asset_sub, order_sub] = resp.result
+  assert asset_sub.type_name == "myAsset"
+  assert asset_sub.codes == None
+  assert order_sub.type_name == "myOrder"
+  assert order_sub.codes == Some(["KRW-BTC", "KRW-ETH"])
 }

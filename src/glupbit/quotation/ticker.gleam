@@ -1,11 +1,17 @@
 //// Current price snapshots — `GET /ticker` and `GET /ticker/all`.
 
 import gleam/dynamic/decode
+import gleam/int
 import gleam/list
 import gleam/string
 
 import glupbit/client
 import glupbit/types
+
+/// Decode a JSON number as Float, accepting both float and int values.
+fn number() -> decode.Decoder(Float) {
+  decode.one_of(decode.float, [decode.int |> decode.map(int.to_float)])
+}
 
 /// Current price snapshot for a trading pair.
 pub type Ticker {
@@ -74,30 +80,27 @@ pub fn ticker_decoder() -> decode.Decoder(Ticker) {
   use trade_date_kst <- decode.field("trade_date_kst", decode.string)
   use trade_time_kst <- decode.field("trade_time_kst", decode.string)
   use trade_timestamp <- decode.field("trade_timestamp", decode.int)
-  use opening_price <- decode.field("opening_price", decode.float)
-  use high_price <- decode.field("high_price", decode.float)
-  use low_price <- decode.field("low_price", decode.float)
-  use trade_price <- decode.field("trade_price", decode.float)
-  use prev_closing_price <- decode.field("prev_closing_price", decode.float)
+  use opening_price <- decode.field("opening_price", number())
+  use high_price <- decode.field("high_price", number())
+  use low_price <- decode.field("low_price", number())
+  use trade_price <- decode.field("trade_price", number())
+  use prev_closing_price <- decode.field("prev_closing_price", number())
   use change <- decode.field("change", decode.string)
-  use change_price <- decode.field("change_price", decode.float)
-  use change_rate <- decode.field("change_rate", decode.float)
-  use signed_change_price <- decode.field("signed_change_price", decode.float)
-  use signed_change_rate <- decode.field("signed_change_rate", decode.float)
-  use trade_volume <- decode.field("trade_volume", decode.float)
-  use acc_trade_price <- decode.field("acc_trade_price", decode.float)
-  use acc_trade_price_24h <- decode.field("acc_trade_price_24h", decode.float)
-  use acc_trade_volume <- decode.field("acc_trade_volume", decode.float)
-  use acc_trade_volume_24h <- decode.field("acc_trade_volume_24h", decode.float)
-  use highest_52_week_price <- decode.field(
-    "highest_52_week_price",
-    decode.float,
-  )
+  use change_price <- decode.field("change_price", number())
+  use change_rate <- decode.field("change_rate", number())
+  use signed_change_price <- decode.field("signed_change_price", number())
+  use signed_change_rate <- decode.field("signed_change_rate", number())
+  use trade_volume <- decode.field("trade_volume", number())
+  use acc_trade_price <- decode.field("acc_trade_price", number())
+  use acc_trade_price_24h <- decode.field("acc_trade_price_24h", number())
+  use acc_trade_volume <- decode.field("acc_trade_volume", number())
+  use acc_trade_volume_24h <- decode.field("acc_trade_volume_24h", number())
+  use highest_52_week_price <- decode.field("highest_52_week_price", number())
   use highest_52_week_date <- decode.field(
     "highest_52_week_date",
     decode.string,
   )
-  use lowest_52_week_price <- decode.field("lowest_52_week_price", decode.float)
+  use lowest_52_week_price <- decode.field("lowest_52_week_price", number())
   use lowest_52_week_date <- decode.field("lowest_52_week_date", decode.string)
   use timestamp <- decode.field("timestamp", decode.int)
   decode.success(Ticker(

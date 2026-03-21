@@ -120,9 +120,10 @@ fn sign_jwt(
 ) -> Result(String, types.ApiError) {
   let Credentials(access_key: AccessKey(ak), secret_key: SecretKey(sk)) = creds
 
+  let key_bytes = bit_array.from_string(sk)
+  let key_bytes = pad_to_min_bytes(key_bytes, 64)
   use key <- result.try(
-    sk
-    |> bit_array.from_string
+    key_bytes
     |> jwk.from_octet_bits
     |> result.map_error(fn(e) {
       types.AuthError("JWK: " <> gose.error_message(e))
@@ -143,7 +144,7 @@ fn sign_jwt(
   )
 
   use signed <- result.try(
-    jwt.sign(jwa.JwsHmac(jwa.HmacSha256), claims, key)
+    jwt.sign(jwa.JwsHmac(jwa.HmacSha512), claims, key)
     |> result.map_error(jwt_error_to_api_error),
   )
 
@@ -152,4 +153,18 @@ fn sign_jwt(
 
 fn jwt_error_to_api_error(err: jwt.JwtError) -> types.ApiError {
   types.AuthError("JWT: " <> string.inspect(err))
+}
+
+/// Zero-pad a BitArray to at least `min` bytes.
+/// HMAC internally pads keys to block size, so this produces identical
+/// signatures — it only satisfies gose's HS512 minimum key length check.
+fn pad_to_min_bytes(bytes: BitArray, min: Int) -> BitArray {
+  let size = bit_array.byte_size(bytes)
+  case size >= min {
+    True -> bytes
+    False -> {
+      let padding_bits = { min - size } * 8
+      bit_array.append(bytes, <<0:size(padding_bits)>>)
+    }
+  }
 }

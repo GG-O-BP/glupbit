@@ -58,6 +58,13 @@ pub fn build_subscription_message(
   json.to_string(json.preprocessed_array(all))
 }
 
+/// Build a LIST_SUBSCRIPTIONS request message as a JSON string.
+pub fn build_list_subscriptions_message(ticket: String) -> String {
+  let ticket_obj = json.object([#("ticket", json.string(ticket))])
+  let method_obj = json.object([#("method", json.string("LIST_SUBSCRIPTIONS"))])
+  json.to_string(json.preprocessed_array([ticket_obj, method_obj]))
+}
+
 fn ws_format_to_string(format: WsFormat) -> String {
   case format {
     Default -> "DEFAULT"
@@ -239,4 +246,50 @@ pub fn orderbook_data_decoder() -> decode.Decoder(OrderbookData) {
     total_bid_size:,
     timestamp:,
   ))
+}
+
+// --- LIST_SUBSCRIPTIONS types ---
+
+/// Information about a single active subscription.
+pub type SubscriptionInfo {
+  SubscriptionInfo(
+    type_name: String,
+    codes: Option(List(String)),
+    level: Option(Float),
+  )
+}
+
+/// Response from a LIST_SUBSCRIPTIONS query.
+pub type ListSubscriptionsResponse {
+  ListSubscriptionsResponse(
+    method: String,
+    result: List(SubscriptionInfo),
+    ticket: String,
+  )
+}
+
+/// Decoder for a single subscription info item.
+pub fn subscription_info_decoder() -> decode.Decoder(SubscriptionInfo) {
+  use type_name <- decode.field("type", decode.string)
+  use codes <- decode.optional_field(
+    "codes",
+    None,
+    decode.optional(decode.list(decode.string)),
+  )
+  use level <- decode.optional_field(
+    "level",
+    None,
+    decode.optional(decode.float),
+  )
+  decode.success(SubscriptionInfo(type_name:, codes:, level:))
+}
+
+/// Decoder for the LIST_SUBSCRIPTIONS response message.
+pub fn list_subscriptions_response_decoder() -> decode.Decoder(
+  ListSubscriptionsResponse,
+) {
+  use method <- decode.field("method", decode.string)
+  use result <- decode.field("result", decode.list(subscription_info_decoder()))
+  use ticket <- decode.field("ticket", decode.string)
+  decode.success(ListSubscriptionsResponse(method:, result:, ticket:))
 }

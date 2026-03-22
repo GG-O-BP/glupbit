@@ -2,10 +2,13 @@
 ////
 //// Handles public and private (authenticated) connections with automatic
 //// message routing based on `type` / `method` fields in incoming JSON.
+//// Supports automatic reconnection with exponential backoff.
 
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/http/request
+import gleam/int
 import gleam/json
 import gleam/result
 
@@ -51,6 +54,17 @@ pub type WsState(user_state) {
 pub type WsHandle =
   Subject(stratus.InternalMessage(WsCommand))
 
+/// Configuration for automatic WebSocket reconnection.
+pub type ReconnectConfig {
+  ReconnectConfig(
+    subscriptions: List(subscription.Subscription),
+    format: subscription.WsFormat,
+    initial_delay_ms: Int,
+    max_delay_ms: Int,
+    on_reconnect: fn() -> Nil,
+  )
+}
+
 // --- Public API ---
 
 /// Connect to the public WebSocket.
@@ -60,6 +74,18 @@ pub fn connect_public(
 ) -> Result(WsHandle, stratus.InitializationError) {
   let assert Ok(req) = request.to(ws_public_url)
   start_ws(req, user_state, handler)
+}
+
+/// Connect to the public WebSocket with automatic reconnection.
+/// On disconnect, retries with exponential backoff (1s, 2s, 4s, ... up to max_delay_ms).
+/// Re-subscribes to the same feeds after successful reconnection.
+pub fn connect_public_with_reconnect(
+  state user_state: user_state,
+  on_message handler: fn(user_state, WsMessage) -> user_state,
+  reconnect config: ReconnectConfig,
+) -> Result(WsHandle, stratus.InitializationError) {
+  let assert Ok(req) = request.to(ws_public_url)
+  start_ws_reconnectable(req, user_state, handler, config)
 }
 
 /// Connect to the private WebSocket with authentication.
@@ -98,25 +124,97 @@ fn start_ws(
   let initial_state = WsState(on_message: handler, user_state: user_state)
 
   stratus.new(request: req, state: initial_state)
-  |> stratus.on_message(fn(state, msg, conn) {
-    case msg {
-      stratus.Text(text) -> {
-        let ws_msg = decode_ws_message(text)
-        let new_user_state = state.on_message(state.user_state, ws_msg)
-        stratus.continue(WsState(..state, user_state: new_user_state))
-      }
-      stratus.Binary(_) -> stratus.continue(state)
-      stratus.User(cmd) -> {
-        let msg_text = build_command_message(cmd)
-        let _ = stratus.send_text_message(conn, msg_text)
-        stratus.continue(state)
-      }
-    }
-  })
+  |> stratus.on_message(ws_message_handler)
   |> stratus.on_close(fn(_state, _reason) { Nil })
   |> stratus.start
   |> result.map(fn(started) { started.data })
 }
+
+fn start_ws_reconnectable(
+  req: request.Request(String),
+  user_state: user_state,
+  handler: fn(user_state, WsMessage) -> user_state,
+  config: ReconnectConfig,
+) -> Result(WsHandle, stratus.InitializationError) {
+  let initial_state = WsState(on_message: handler, user_state: user_state)
+
+  stratus.new(request: req, state: initial_state)
+  |> stratus.on_message(ws_message_handler)
+  |> stratus.on_close(fn(state, _reason) {
+    // Spawn reconnection loop in a separate process
+    let _ =
+      erlang_spawn(fn() {
+        reconnect_loop(
+          req,
+          state.user_state,
+          state.on_message,
+          config,
+          config.initial_delay_ms,
+        )
+      })
+    Nil
+  })
+  |> stratus.start
+  |> result.map(fn(started) { started.data })
+}
+
+fn ws_message_handler(
+  state: WsState(user_state),
+  msg: stratus.Message(WsCommand),
+  conn: stratus.Connection,
+) -> stratus.Next(WsState(user_state), WsCommand) {
+  case msg {
+    stratus.Text(text) -> {
+      let ws_msg = decode_ws_message(text)
+      let new_user_state = state.on_message(state.user_state, ws_msg)
+      stratus.continue(WsState(..state, user_state: new_user_state))
+    }
+    stratus.Binary(_) -> stratus.continue(state)
+    stratus.User(cmd) -> {
+      let msg_text = build_command_message(cmd)
+      let _ = stratus.send_text_message(conn, msg_text)
+      stratus.continue(state)
+    }
+  }
+}
+
+/// Exponential backoff reconnection loop.
+/// Retries until successful, doubling delay each time up to max_delay_ms.
+fn reconnect_loop(
+  req: request.Request(String),
+  user_state: user_state,
+  handler: fn(user_state, WsMessage) -> user_state,
+  config: ReconnectConfig,
+  delay_ms: Int,
+) -> Nil {
+  log_info("[WS] Reconnecting in " <> int.to_string(delay_ms) <> "ms...")
+  process.sleep(delay_ms)
+
+  case start_ws_reconnectable(req, user_state, handler, config) {
+    Ok(new_handle) -> {
+      // Re-subscribe to feeds
+      subscribe(new_handle, config.subscriptions, config.format)
+      config.on_reconnect()
+      log_info("[WS] Reconnected and re-subscribed")
+    }
+    Error(_) -> {
+      // Exponential backoff: double delay, cap at max
+      let next_delay =
+        float.truncate(float.min(
+          int.to_float(delay_ms * 2),
+          int.to_float(config.max_delay_ms),
+        ))
+      log_info("[WS] Reconnection failed, retrying...")
+      reconnect_loop(req, user_state, handler, config, next_delay)
+    }
+  }
+}
+
+@external(erlang, "erlang", "spawn")
+fn erlang_spawn(f: fn() -> a) -> process.Pid
+
+@external(erlang, "logger", "notice")
+fn log_info(msg: String) -> Nil
 
 fn build_command_message(cmd: WsCommand) -> String {
   let ticket = uuid.v4_string()

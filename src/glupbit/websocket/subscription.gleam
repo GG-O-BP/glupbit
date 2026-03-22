@@ -5,6 +5,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 
+import gleam/int
+import glupbit/quotation/orderbook
 import glupbit/types
 
 /// WebSocket response format.
@@ -192,6 +194,7 @@ pub type OrderbookData {
     code: String,
     total_ask_size: Float,
     total_bid_size: Float,
+    orderbook_units: List(orderbook.OrderbookUnit),
     timestamp: Int,
   )
 }
@@ -234,16 +237,39 @@ pub fn trade_data_decoder() -> decode.Decoder(TradeData) {
   ))
 }
 
+/// Decode a JSON number as Float, accepting both float and int values.
+fn ws_number() -> decode.Decoder(Float) {
+  decode.one_of(decode.float, [decode.int |> decode.map(int.to_float)])
+}
+
+fn ws_orderbook_unit_decoder() -> decode.Decoder(orderbook.OrderbookUnit) {
+  use ask_price <- decode.field("ask_price", ws_number())
+  use bid_price <- decode.field("bid_price", ws_number())
+  use ask_size <- decode.field("ask_size", ws_number())
+  use bid_size <- decode.field("bid_size", ws_number())
+  decode.success(orderbook.OrderbookUnit(
+    ask_price:,
+    bid_price:,
+    ask_size:,
+    bid_size:,
+  ))
+}
+
 /// Decoder for WebSocket orderbook data.
 pub fn orderbook_data_decoder() -> decode.Decoder(OrderbookData) {
   use code <- decode.field("code", decode.string)
-  use total_ask_size <- decode.field("total_ask_size", decode.float)
-  use total_bid_size <- decode.field("total_bid_size", decode.float)
+  use total_ask_size <- decode.field("total_ask_size", ws_number())
+  use total_bid_size <- decode.field("total_bid_size", ws_number())
+  use orderbook_units <- decode.field(
+    "orderbook_units",
+    decode.list(ws_orderbook_unit_decoder()),
+  )
   use timestamp <- decode.field("timestamp", decode.int)
   decode.success(OrderbookData(
     code:,
     total_ask_size:,
     total_bid_size:,
+    orderbook_units:,
     timestamp:,
   ))
 }

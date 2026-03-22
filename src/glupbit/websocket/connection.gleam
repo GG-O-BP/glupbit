@@ -19,9 +19,9 @@ import youid/uuid
 
 // --- Constants ---
 
-const ws_public_url = "wss://api.upbit.com/websocket/v1"
+const ws_public_url = "https://api.upbit.com/websocket/v1"
 
-const ws_private_url = "wss://api.upbit.com/websocket/v1/private"
+const ws_private_url = "https://api.upbit.com/websocket/v1/private"
 
 // --- Types ---
 

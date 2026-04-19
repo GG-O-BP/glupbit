@@ -4,6 +4,7 @@
 //// message routing based on `type` / `method` fields in incoming JSON.
 //// Supports automatic reconnection with exponential backoff.
 
+import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -169,7 +170,22 @@ fn ws_message_handler(
       let new_user_state = state.on_message(state.user_state, ws_msg)
       stratus.continue(WsState(..state, user_state: new_user_state))
     }
-    stratus.Binary(_) -> stratus.continue(state)
+    // Upbit transmits every real-time payload — ticker, trade,
+    // orderbook, and the `{"status":"UP"}` heartbeat — as opcode 2
+    // BinaryFrame, not TextFrame. stratus + gramps auto-decompress
+    // permessage-deflate, so `bytes` arrives as raw JSON UTF-8.
+    stratus.Binary(bytes) -> {
+      case bit_array.to_string(bytes) {
+        Ok(text) -> {
+          let ws_msg = decode_ws_message(text)
+          let new_user_state = state.on_message(state.user_state, ws_msg)
+          stratus.continue(WsState(..state, user_state: new_user_state))
+        }
+        // Upbit guarantees JSON; swallow non-UTF8 frames rather than
+        // crashing the socket actor.
+        Error(_) -> stratus.continue(state)
+      }
+    }
     stratus.User(cmd) -> {
       let msg_text = build_command_message(cmd)
       let _ = stratus.send_text_message(conn, msg_text)
@@ -227,7 +243,12 @@ fn build_command_message(cmd: WsCommand) -> String {
 
 // --- Message decoding ---
 
-fn decode_ws_message(text: String) -> WsMessage {
+// Exposed as `pub` so `test/glupbit/websocket/connection_test.gleam`
+// can exercise the status / error / type branches directly. This
+// is the single decode boundary for every WebSocket payload — both
+// Text and Binary arms route through here — so regression coverage
+// belongs at the module API surface.
+pub fn decode_ws_message(text: String) -> WsMessage {
   case json.parse(text, field_decoder("status")) {
     Ok(status) -> StatusMsg(status)
     Error(_) ->
